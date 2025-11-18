@@ -1,0 +1,22 @@
+# 1. 绝对不能上传的敏感配置
+.env
+.env.local
+*.key
+secrets.json
+
+# 2. Python 产生的垃圾文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 3. 虚拟环境 (不需要上传，别人会自己建)
+.venv/
+venv/
+env/
+
+# 4. 系统垃圾文件
+.DS_Store
+
+# 5. IDE 配置文件 (可选)
+.vscode/
+.idea/

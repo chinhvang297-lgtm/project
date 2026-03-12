@@ -1,5 +1,4 @@
-# 1. 绝对不能上传的敏感配置
-.env
+# 1. 敏感配置（当前已允许 .env 上传）
 .env.local
 *.key
 secrets.json
@@ -20,3 +19,7 @@ env/
 # 5. IDE 配置文件 (可选)
 .vscode/
 .idea/
+
+# 6. Runtime data
+nba_prediction.db
+nba_knowledge_db/

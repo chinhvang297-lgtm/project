@@ -2,16 +2,13 @@
 LangGraph workflow with graceful degradation.
 
 Features:
-- Timeout wrapper: agents that take too long are skipped gracefully
 - Fault-tolerant execution: individual agent failures don't crash the pipeline
 - Agent health tracking: records which agents succeeded, failed, or timed out
 """
-import concurrent.futures
 from functools import wraps
 
 from langgraph.graph import StateGraph, START, END
 
-from app.core.config import settings
 from app.core.logger import get_logger
 from app.graph.nodes.state import AgentState
 from app.graph.nodes.recent_analyst import recent_analyst_node
@@ -26,28 +23,20 @@ logger = get_logger("workflow")
 
 def with_graceful_degradation(node_func, agent_name: str, output_key: str):
     """
-    Wrap an agent node with timeout and error handling.
+    Wrap an agent node with error handling.
 
-    If an agent fails or times out:
+    If an agent fails:
     - Returns a fallback message instead of crashing
     - Records the failure in agent_status for the final predictor
     - Allows the rest of the pipeline to continue
+
+    Note: no ThreadPoolExecutor timeout — LangGraph fan-out already runs
+    nodes in threads; nesting threads causes segfaults on Windows (ChromaDB sqlite).
     """
     @wraps(node_func)
     def wrapper(state: AgentState) -> dict:
-        timeout = settings.agent_timeout
-
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(node_func, state)
-                result = future.result(timeout=timeout)
-                return result
-        except concurrent.futures.TimeoutError:
-            logger.error(f"[TIMEOUT] {agent_name} exceeded {timeout}s limit")
-            return {
-                output_key: f"[{agent_name} timed out after {timeout}s — report unavailable]",
-                "agent_status": {agent_name: "timeout"},
-            }
+            return node_func(state)
         except Exception as e:
             logger.error(f"[FAILED] {agent_name} crashed: {type(e).__name__}: {e}")
             return {

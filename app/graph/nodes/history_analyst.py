@@ -1,8 +1,8 @@
 """
-Agent 2: Historical Matchup Analyst (RAG-enhanced)
+Agent 2: Historical Matchup Analyst
 
-Uses the enhanced RAG pipeline (query rewriting + reranking) to
-retrieve historical matchup data and produce tactical analysis.
+Searches for historical matchup data via web search and produces
+tactical analysis with structured output.
 """
 from langchain_core.messages import HumanMessage
 
@@ -10,7 +10,7 @@ from app.core.config import llm
 from app.core.logger import get_logger, log_agent
 from app.graph.nodes.state import AgentState
 from app.graph.nodes.models import HistoryAnalysis
-from app.tools.retriever import query_knowledge_base
+from app.tools.nba_client import search_web
 from app.prompts.templates import HISTORY_ANALYST_PROMPT
 
 logger = get_logger("agent.history_analyst")
@@ -19,17 +19,17 @@ logger = get_logger("agent.history_analyst")
 @log_agent("history_analyst")
 def history_analyst_node(state: AgentState) -> dict:
     """
-    Agent 2: RAG-based historical analysis with query rewriting and reranking.
+    Agent 2: Historical analysis via web search.
 
-    Pipeline: Query Rewrite -> Multi-query Retrieval -> Rerank -> LLM Analysis -> Structured Output
+    Pipeline: Web Search -> LLM Analysis -> Structured Output
     """
     home_team = state["team_home"]
     away_team = state["team_away"]
 
-    search_query = f"{home_team} vs {away_team} historical matchup tactics key factors"
+    search_query = f"{home_team} vs {away_team} head to head history record all time series"
 
-    # Enhanced RAG with query rewriting and reranking
-    historical_context = query_knowledge_base(search_query, k=3, llm=llm)
+    # Search web for historical matchup data
+    historical_context = search_web(search_query, max_results=3)
 
     prompt = HISTORY_ANALYST_PROMPT.format(
         home_team=home_team,

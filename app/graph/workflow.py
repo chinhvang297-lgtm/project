@@ -75,21 +75,15 @@ workflow.add_node("odds_analyst", safe_odds_analyst)
 workflow.add_node("strategy_analyst", safe_strategy_analyst)
 workflow.add_node("final_predictor", final_predictor_node)
 
-# Fan-out: all 5 analysts run in parallel from START
+# Sequential pipeline: avoids concurrent threading that crashes native
+# libraries (ChromaDB sqlite / Tavily) on Windows.
+# Architecture is still 6 agents — just executed one after another.
 workflow.add_edge(START, "recent_analyst")
-workflow.add_edge(START, "history_analyst")
-workflow.add_edge(START, "team_reporter")
-workflow.add_edge(START, "odds_analyst")
-workflow.add_edge(START, "strategy_analyst")
-
-# Fan-in: all analysts feed into the final predictor
-workflow.add_edge("recent_analyst", "final_predictor")
+workflow.add_edge("recent_analyst", "odds_analyst")
+workflow.add_edge("odds_analyst", "strategy_analyst")
+workflow.add_edge("strategy_analyst", "team_reporter")
+workflow.add_edge("team_reporter", "history_analyst")
 workflow.add_edge("history_analyst", "final_predictor")
-workflow.add_edge("team_reporter", "final_predictor")
-workflow.add_edge("odds_analyst", "final_predictor")
-workflow.add_edge("strategy_analyst", "final_predictor")
-
-# Final predictor outputs to END
 workflow.add_edge("final_predictor", END)
 
 # Compile the workflow

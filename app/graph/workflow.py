@@ -13,7 +13,6 @@ from app.core.logger import get_logger
 from app.graph.nodes.state import AgentState
 from app.graph.nodes.recent_analyst import recent_analyst_node
 from app.graph.nodes.history_analyst import history_analyst_node
-from app.graph.nodes.team_reporter import team_reporter_node
 from app.graph.nodes.odds_analyst import odds_analyst_node
 from app.graph.nodes.strategy_analyst import strategy_analyst_node
 from app.graph.nodes.final_predictor import final_predictor_node
@@ -29,9 +28,6 @@ def with_graceful_degradation(node_func, agent_name: str, output_key: str):
     - Returns a fallback message instead of crashing
     - Records the failure in agent_status for the final predictor
     - Allows the rest of the pipeline to continue
-
-    Note: no ThreadPoolExecutor timeout — LangGraph fan-out already runs
-    nodes in threads; nesting threads causes segfaults on Windows (ChromaDB sqlite).
     """
     @wraps(node_func)
     def wrapper(state: AgentState) -> dict:
@@ -54,9 +50,6 @@ safe_recent_analyst = with_graceful_degradation(
 safe_history_analyst = with_graceful_degradation(
     history_analyst_node, "history_analyst", "history_analysis"
 )
-safe_team_reporter = with_graceful_degradation(
-    team_reporter_node, "team_reporter", "news_analysis"
-)
 safe_odds_analyst = with_graceful_degradation(
     odds_analyst_node, "odds_analyst", "odds_analysis"
 )
@@ -64,25 +57,20 @@ safe_strategy_analyst = with_graceful_degradation(
     strategy_analyst_node, "strategy_analyst", "strategy_analysis"
 )
 
-# Build the workflow graph
+# Build the workflow graph (5 agents: removed team_reporter for speed)
 workflow = StateGraph(AgentState)
 
-# Register nodes (with graceful degradation wrappers)
 workflow.add_node("recent_analyst", safe_recent_analyst)
 workflow.add_node("history_analyst", safe_history_analyst)
-workflow.add_node("team_reporter", safe_team_reporter)
 workflow.add_node("odds_analyst", safe_odds_analyst)
 workflow.add_node("strategy_analyst", safe_strategy_analyst)
 workflow.add_node("final_predictor", final_predictor_node)
 
-# Sequential pipeline: avoids concurrent threading that crashes native
-# libraries (ChromaDB sqlite / Tavily) on Windows.
-# Architecture is still 6 agents — just executed one after another.
+# Sequential pipeline
 workflow.add_edge(START, "recent_analyst")
 workflow.add_edge("recent_analyst", "odds_analyst")
 workflow.add_edge("odds_analyst", "strategy_analyst")
-workflow.add_edge("strategy_analyst", "team_reporter")
-workflow.add_edge("team_reporter", "history_analyst")
+workflow.add_edge("strategy_analyst", "history_analyst")
 workflow.add_edge("history_analyst", "final_predictor")
 workflow.add_edge("final_predictor", END)
 

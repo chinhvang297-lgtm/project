@@ -4,6 +4,7 @@ Application configuration using Pydantic BaseSettings.
 Supports loading from environment variables and .env file.
 Centralizes all configuration in one place for easy management.
 """
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from langchain_openai import ChatOpenAI
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     agent_max_retries: int = Field(default=2, alias="AGENT_MAX_RETRIES")
 
     # Search Configuration
+    tavily_api_key: str = Field(..., alias="TAVILY_API_KEY")
     tavily_max_results: int = Field(default=5, alias="TAVILY_MAX_RESULTS")
 
     # RAG Configuration
@@ -55,6 +57,10 @@ class Settings(BaseSettings):
 
 # Initialize settings
 settings = Settings()
+
+# Export API keys to os.environ so third-party SDKs can find them
+os.environ.setdefault("TAVILY_API_KEY", settings.tavily_api_key)
+os.environ.setdefault("DASHSCOPE_API_KEY", settings.dashscope_api_key)
 
 # Setup structured logging
 setup_logging(level=settings.log_level)

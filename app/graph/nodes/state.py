@@ -1,10 +1,18 @@
 """
 Agent State definition for the LangGraph workflow.
 
-Uses TypedDict with Optional types to support graceful degradation
-when individual agents fail or timeout.
+Uses TypedDict with Annotated reducers to support graceful degradation
+and parallel agent fan-out/fan-in merging.
 """
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, Annotated
+
+
+def merge_dicts(a: dict | None, b: dict | None) -> dict:
+    """Reducer that merges agent_status dicts from parallel branches."""
+    merged = dict(a) if a else {}
+    if b:
+        merged.update(b)
+    return merged
 
 
 class AgentState(TypedDict):
@@ -23,5 +31,5 @@ class AgentState(TypedDict):
     # Final output
     final_prediction: Optional[str]
 
-    # Metadata for tracking agent health
-    agent_status: Optional[dict]  # {"agent_name": "success" | "failed" | "timeout"}
+    # Metadata for tracking agent health (merged from parallel agents)
+    agent_status: Annotated[dict, merge_dicts]

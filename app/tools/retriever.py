@@ -22,6 +22,10 @@ PERSIST_DIRECTORY = "./nba_knowledge_db"
 
 def get_vector_store():
     """Initialize and return the ChromaDB vector store."""
+    if not os.path.isdir(PERSIST_DIRECTORY):
+        logger.warning(f"Knowledge base directory '{PERSIST_DIRECTORY}' not found, creating empty store")
+        os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
+
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
         raise ValueError("DASHSCOPE_API_KEY not found in environment variables")

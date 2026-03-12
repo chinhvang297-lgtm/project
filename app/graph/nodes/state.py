@@ -1,15 +1,27 @@
-# /Users/shanzi/iemsProject/app/graph/nodes/state.py
-from typing import TypedDict
+"""
+Agent State definition for the LangGraph workflow.
+
+Uses TypedDict with Optional types to support graceful degradation
+when individual agents fail or timeout.
+"""
+from typing import TypedDict, Optional
+
 
 class AgentState(TypedDict):
+    """Shared state across all agents in the prediction workflow."""
+    # Input
     team_home: str
     team_away: str
 
-    recent_analysis: str
-    history_analysis: str
-    news_analysis: str
+    # Agent outputs (Optional to support graceful degradation)
+    recent_analysis: Optional[str]
+    history_analysis: Optional[str]
+    news_analysis: Optional[str]
+    odds_analysis: Optional[str]
+    strategy_analysis: Optional[str]
 
-    odds_analysis: str
-    strategy_analysis: str
+    # Final output
+    final_prediction: Optional[str]
 
-    final_prediction: str
+    # Metadata for tracking agent health
+    agent_status: Optional[dict]  # {"agent_name": "success" | "failed" | "timeout"}

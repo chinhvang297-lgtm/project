@@ -14,7 +14,7 @@
 | **Qwen3-Max (通义千问)** | 大语言模型 | 通过阿里云 DashScope API 调用，作为所有 Agent 的推理引擎 |
 | **FastAPI** | Web 框架 | 高性能异步 API 服务，提供 RESTful 接口 |
 | **Streamlit** | 前端 UI | 快速构建数据应用的 Python 前端框架 |
-| **ChromaDB** | 向量数据库 | 存储 NBA 历史对战数据的向量库，用于 RAG 检索 |
+| **FAISS** | 向量数据库 | 存储 NBA 历史对战数据的向量库，用于 RAG 检索（线程安全，支持并行） |
 | **SQLite + SQLAlchemy** | 关系数据库 | 存储预测记录和评估结果，支持 ORM 操作 |
 | **Tavily Search** | 实时搜索 | AI 原生的网络搜索 API，获取实时 NBA 数据 |
 | **DashScope Embeddings** | 文本嵌入 | 阿里云的文本向量化服务，用于 RAG 中的文档向量化 |
@@ -31,10 +31,10 @@ project/
 ├── .gitignore                          # Git 忽略规则
 ├── requirements.txt                    # Python 依赖清单
 ├── nba_prediction.db                   # SQLite 数据库文件（运行时生成）
-├── nba_knowledge_db/                   # ChromaDB 向量数据库目录（运行时生成）
+├── nba_knowledge_db/                   # FAISS 向量数据库目录（运行 ingest_data.py 后生成）
 │
 ├── scripts/
-│   └── ingest_data.py                  # 数据摄入脚本：从 Basketball-Reference 抓取历史数据写入向量库
+│   └── ingest_data.py                  # 数据摄入脚本：从 ESPN API 抓取历史数据写入 FAISS 向量库
 │
 └── app/                                # 主应用目录
     ├── main.py                         # FastAPI 应用入口
@@ -54,7 +54,7 @@ project/
     │       ├── models.py              # 所有 Agent 的结构化输出模型
     │       ├── recent_analyst.py       # Agent 1: 近期表现分析师
     │       ├── history_analyst.py      # Agent 2: 历史对战分析师（RAG）
-    │       ├── team_reporter.py        # Agent 3: 球队记者（ReAct 模式）
+    │       ├── team_reporter.py        # Agent 3: 球队记者（直接搜索模式）
     │       ├── odds_analyst.py         # Agent 4: 赔率分析师
     │       ├── strategy_analyst.py     # Agent 5: 战术教练
     │       └── final_predictor.py      # Agent 6: 最终决策者
@@ -62,7 +62,7 @@ project/
     ├── tools/                          # 外部工具封装
     │   ├── __init__.py
     │   ├── nba_client.py              # NBA 数据客户端（搜索 + 缓存 + 重试）
-    │   └── retriever.py               # RAG 检索管道（查询改写 + 重排序）
+    │   └── retriever.py               # FAISS RAG 检索管道（向量相似度搜索）
     │
     ├── prompts/                        # Prompt 模板管理
     │   ├── __init__.py
@@ -135,23 +135,22 @@ project/
 ---
 
 #### `scripts/ingest_data.py`
-**功能**：从 Basketball-Reference 网站抓取 NBA 真实历史比赛数据，转化为向量并写入 ChromaDB，构建 RAG 知识库。
+**功能**：从 ESPN API 抓取 NBA 历史比赛数据，转化为向量并写入 FAISS，构建 RAG 知识库。
 
 **详细流程**：
-1. 使用 `requests` 模拟浏览器请求 Basketball-Reference 网站
-2. 用 `pandas.read_html()` 解析 HTML 表格提取比赛数据
-3. 将每场比赛数据转换为结构化文本（日期、对阵、比分、胜负）
-4. 封装为 LangChain `Document` 对象（包含 `page_content` 和 `metadata`）
-5. 通过 DashScope Embeddings 向量化后存入 ChromaDB
-6. 分批写入（batch_size=50）防止内存溢出
+1. 使用 `requests` 调用 ESPN API 获取历史比赛数据
+2. 将每场比赛数据转换为结构化文本（日期、对阵、比分、胜负）
+3. 封装为 LangChain `Document` 对象（包含 `page_content` 和 `metadata`）
+4. 通过 DashScope Embeddings 向量化
+5. 使用 FAISS 构建向量索引，分批写入（batch_size=50）
+6. 保存到本地 `nba_knowledge_db/` 目录
 
 **涉及技术**：
-- `requests` — HTTP 请求（带 User-Agent 伪装绕过反爬）
-- `pandas` — HTML 表格解析（`pd.read_html()`）
+- `requests` — HTTP 请求 ESPN API
 - `LangChain Document` — 文档抽象（page_content + metadata）
-- `ChromaDB` — 向量数据库持久化存储
+- `FAISS` — 向量索引，`from_documents()` + `save_local()` 持久化
 - `DashScope Embeddings` — 阿里云文本向量化 API
-- `time.sleep()` — 请求间隔（避免触发网站反爬限制）
+- 内存安全 — 分批处理防止 OOM
 
 ---
 
@@ -183,29 +182,26 @@ project/
 ---
 
 #### `app/frontend_ui.py`
-**功能**：基于 Streamlit 构建的交互式前端界面，包含项目介绍、架构图、技术说明和实时预测演示。
+**功能**：基于 Streamlit 构建的交互式前端界面，专注于预测功能展示，带实时 Agent 状态追踪。
 
 **详细说明**：
-1. **页面配置**：设置页面标题、宽布局、自定义 CSS 样式
-2. **侧边栏导航**：项目路线图目录，可快速跳转到各章节
-3. **项目介绍**：解释为什么传统机器学习模型在体育预测上的局限性
-4. **架构图**：使用 **Mermaid** 语法渲染系统架构流程图
-5. **技术深度讲解**：6 个 Agent 各自的工作原理和代码片段
-6. **实时演示**：
-   - 从 **ESPN API** 获取当日 NBA 赛程
-   - 用户选择比赛后点击预测
-   - 调用后端 API 执行预测
-   - 展示预测结果（赢家、胜率、比分预测、关键因素等）
-7. **后端基础设施说明**：数据库设计和反馈循环
+1. **页面配置**：设置页面标题、宽布局、自定义 CSS 样式（深色主题）
+2. **日期选择器**：选择比赛日期，从 ESPN API 获取当日赛程
+3. **比赛选择**：下拉菜单选择比赛，展示对阵卡片
+4. **手动输入**：无比赛时支持手动输入队名
+5. **Agent 状态追踪**：
+   - 使用 `st.status` 组件实时显示 6 个 Agent 的运行状态
+   - 通过 SSE 流式端点 (`/predict/stream`) 获取实时更新
+   - 每个 Agent 完成时即时更新状态（Waiting → Running → Done）
+6. **结果展示**：赢家、胜率、比分预测、Agent 共识度、关键因素等
 
 **涉及技术**：
-- `Streamlit` — Python 前端框架（`st.columns`, `st.metric`, `st.status` 等组件）
-- `streamlit-mermaid` — Mermaid 图表渲染组件
-- `requests` — 调用后端 API 和 ESPN API
-- `st.cache_data` — Streamlit 数据缓存（TTL=3600s）
-- ESPN API — `site.api.espn.com` 获取 NBA 赛程
-- CSS — 自定义页面样式
-- Mermaid — 架构流程图描述语言
+- `Streamlit` — `st.status`, `st.empty`, `st.columns`, `st.date_input` 等组件
+- `requests` — 调用后端 API 和 ESPN API（支持 SSE 流式读取）
+- `st.cache_data` — 赛程缓存（TTL=600s）
+- ESPN API — 获取 NBA 赛程
+- SSE（Server-Sent Events） — 实时 Agent 状态流式传输
+- CSS — 自定义结果卡片样式
 
 ---
 
@@ -282,19 +278,19 @@ project/
 
 **详细说明**：
 1. `with_graceful_degradation()` — 核心封装函数，为每个 Agent 添加：
-   - **超时控制**：使用 `ThreadPoolExecutor` 实现超时，超过配置时间自动跳过
    - **异常捕获**：Agent 崩溃时返回降级消息，不影响其他 Agent
-   - **状态记录**：在 `agent_status` 中记录每个 Agent 的执行结果（success/timeout/failed）
+   - **状态记录**：在 `agent_status` 中记录每个 Agent 的执行结果（success/fallback/failed）
 2. 5 个分析 Agent 用降级包装器包装
 3. 构建 `StateGraph`：
    - `START → 5 个 Agent`（并行扇出）
    - `5 个 Agent → final_predictor`（扇入汇聚）
    - `final_predictor → END`
 4. `workflow.compile()` — 编译为可执行的工作流图
+5. 支持 `stream()` 模式用于 SSE 流式输出
 
 **涉及技术**：
 - `LangGraph StateGraph` — 基于状态的有向图工作流引擎
-- `concurrent.futures.ThreadPoolExecutor` — 线程池 + 超时控制
+- `Annotated[dict, merge_dicts]` — 并行状态合并的 reducer 函数
 - Fan-out/Fan-in 并行模式 — 5 个 Agent 并行执行后汇聚
 - 优雅降级（Graceful Degradation） — 部分失败不影响整体
 - 装饰器模式 + `@wraps` — 保留原函数签名
@@ -309,10 +305,12 @@ project/
 - **输入字段**：`team_home`（主队）、`team_away`（客队）
 - **Agent 输出字段**：5 个 `Optional[str]` 字段存储各 Agent 的分析报告（Optional 支持优雅降级）
 - **最终输出**：`final_prediction` 存储最终预测结果
-- **元数据**：`agent_status` 字典跟踪每个 Agent 的执行状态
+- **元数据**：`agent_status: Annotated[dict, merge_dicts]` — 使用 reducer 函数自动合并并行 Agent 的状态更新
+- `merge_dicts` reducer — 解决 LangGraph 并行节点同时写入同一字段的 `InvalidUpdateError` 问题
 
 **涉及技术**：
 - `TypedDict` — Python 类型化字典（LangGraph 状态管理要求）
+- `Annotated` — 类型标注 + reducer 函数（LangGraph 并行状态合并）
 - `Optional` — 类型标注，支持 None 值（Agent 失败时）
 
 ---
@@ -356,43 +354,36 @@ project/
 ---
 
 #### `app/graph/nodes/history_analyst.py`
-**功能**：**Agent 2 — 历史对战分析师**。使用增强 RAG 管道从向量数据库检索历史对战数据。
+**功能**：**Agent 2 — 历史对战分析师**。使用 FAISS RAG + Web 搜索混合模式获取历史对战数据。
 
 **执行流程**：
-1. 构建检索查询（包含两队名称和关键词）
-2. 调用增强 RAG 管道 `query_knowledge_base(query, k=3, llm=llm)`：
-   - 查询改写（Query Rewriting）
-   - 多查询检索（Multi-query Retrieval）
-   - 文档去重（Deduplication）
-   - LLM 重排序（Reranking）
-3. 将检索到的历史数据注入 `HISTORY_ANALYST_PROMPT`
-4. 生成结构化的战术分析报告
+1. 调用 `query_knowledge_base()` 从 FAISS 向量库检索历史数据
+2. 调用 `search_web()` 从网络获取补充历史数据
+3. 合并 RAG 结果和 Web 搜索结果作为上下文
+4. 使用 `HISTORY_ANALYST_PROMPT` + 结构化输出生成分析报告
 
 **涉及技术**：
 - **RAG（检索增强生成）** — 用真实数据增强 LLM 输出，减少幻觉
-- **ChromaDB 向量检索** — 语义相似度搜索
-- **两阶段检索** — 先广泛检索再精准重排序
-- Query Rewriting — LLM 改写查询提升召回率
-- LLM Reranking — LLM 对检索结果重新排序提升精度
+- **FAISS 向量检索** — `similarity_search()` 语义相似度搜索
+- **混合检索** — RAG + Web 搜索双通道，提高数据覆盖率
+- **优雅降级** — FAISS 不可用时自动回退到纯 Web 搜索
 
 ---
 
 #### `app/graph/nodes/team_reporter.py`
-**功能**：**Agent 3 — 球队记者**。自主决定是否搜索网络，使用 ReAct 模式（Reason + Act）。
+**功能**：**Agent 3 — 球队记者**。执行 2 次精准的 Tavily 搜索获取伤病和新闻信息。
 
 **执行流程**：
-1. 使用 `llm.bind_tools([search_tool])` 绑定搜索工具
-2. **Phase 1（Reason）**：LLM 分析是否需要搜索
-3. **Phase 2（Act）**：如果 LLM 产生了 `tool_calls`，执行搜索工具并返回结果
-4. **Phase 3（Observe）**：LLM 综合搜索结果生成报告
-5. **Phase 4（Structure）**：将报告转换为 `NewsAnalysis` 结构化格式
+1. 执行伤病报告搜索（`search_web` 搜索 injury report）
+2. 执行最新新闻搜索（`search_web` 搜索 latest news trades）
+3. 合并搜索结果作为上下文
+4. 使用 `TEAM_REPORTER_PROMPT` + 结构化输出生成 `NewsAnalysis` 报告
 
 **涉及技术**：
-- **ReAct 模式** — Reason + Act 循环（Agent 自主决策是否使用工具）
-- **Tool Calling** — LLM 生成函数调用请求，系统执行后返回结果
-- `llm.bind_tools()` — LangChain 的工具绑定 API
-- `ToolMessage` — LangChain 的工具返回消息格式
-- 自主 Agent — 与其他 Agent 不同，Agent 3 **自己决定**是否搜索
+- **直接搜索模式** — 2 次精准搜索替代 ReAct 多轮调用（性能优化：从 60s → 15s）
+- `Tavily Search` — AI 原生搜索 API
+- LLM Structured Output — `NewsAnalysis` 模型
+- 性能优化 — 减少 LLM 调用次数，避免超时
 
 ---
 
@@ -471,31 +462,25 @@ project/
 ---
 
 #### `app/tools/retriever.py`
-**功能**：增强 RAG 检索管道，实现两阶段检索（Retrieve → Rerank）。
+**功能**：FAISS RAG 检索管道，提供向量相似度搜索功能。
 
 **详细说明**：
-1. `get_vector_store()` — 初始化 ChromaDB 向量数据库连接
-2. `rewrite_query()` — **查询改写**：
-   - 用 LLM 将原始查询改写为 2 个优化查询
-   - 加上原始查询共 3 个查询，从不同角度检索
-3. `deduplicate_docs()` — **文档去重**：
-   - 基于 `page_content` 哈希去除重复文档
-4. `rerank_documents()` — **LLM 重排序**：
-   - 将检索到的文档交给 LLM 按相关性排序
-   - 解析 LLM 返回的排序结果（如 "3,1,4,2,5"）
-   - 保留 Top-N 最相关文档
-5. `query_knowledge_base()` — **完整 RAG 管道**：
-   ```
-   Query Rewriting → Multi-query Retrieval → Deduplication → LLM Reranking → Format Output
-   ```
+1. `get_vector_store()` — 初始化 FAISS 向量数据库：
+   - 使用 `DashScopeEmbeddings` 向量化
+   - `FAISS.load_local()` 加载持久化索引
+   - 全局缓存（`_vector_store_cache`），加载后常驻内存
+   - 线程安全，支持并行读取
+2. `query_knowledge_base(query, k=3)` — 执行 RAG 检索：
+   - 调用 `similarity_search()` 检索 Top-K 相关文档
+   - 格式化输出包含来源信息
+   - 向量库不存在时优雅降级（返回提示信息而非崩溃）
 
 **涉及技术**：
 - **RAG（Retrieval-Augmented Generation）** — 检索增强生成
-- **ChromaDB** — 向量数据库（`similarity_search`）
-- **DashScope Embeddings** — 阿里云文本向量化
-- **Query Rewriting** — 查询改写提升召回率
-- **LLM Reranking** — 两阶段检索（粗排 + 精排）
-- **Multi-query Retrieval** — 多查询检索扩大召回范围
+- **FAISS** — Facebook 开源的高性能向量检索库（`faiss-cpu`）
+- **DashScope Embeddings** — 阿里云 `text-embedding-v1` 向量化
+- **内存缓存** — 向量库加载一次后常驻内存
+- **优雅降级** — 向量库缺失时返回提示，不阻断流程
 
 ---
 
@@ -550,6 +535,7 @@ project/
 | 方法 | 路径 | 功能 | 说明 |
 |------|------|------|------|
 | `POST` | `/predict` | 运行预测 | 检查缓存 → 执行多 Agent 工作流 → 存储结果 → 返回预测 |
+| `POST` | `/predict/stream` | SSE 流式预测 | 实时推送 Agent 状态更新（agent_start/agent_done/result） |
 | `GET` | `/predictions` | 预测历史 | 分页查询 + 按球队名筛选 |
 | `GET` | `/predictions/{id}` | 预测详情 | 返回所有 Agent 报告 + 执行元数据 + 评估结果 |
 | `POST` | `/evaluate/{id}` | 评估预测 | 比赛结束后回填实际结果，自动判断预测是否正确 |
@@ -669,8 +655,8 @@ project/
    │  ┌──── Fan-out (并行) ────┐    │
    │  │                        │    │
    │  │  Agent 1: 近期表现      │    │  ← Tavily Search + 缓存 + 重试
-   │  │  Agent 2: 历史对战      │    │  ← ChromaDB RAG (改写+重排序)
-   │  │  Agent 3: 新闻伤病      │    │  ← ReAct Tool Calling
+   │  │  Agent 2: 历史对战      │    │  ← FAISS RAG + Web 搜索混合
+   │  │  Agent 3: 新闻伤病      │    │  ← 2 次精准 Tavily 搜索
    │  │  Agent 4: 赔率市场      │    │  ← Tavily Search + 缓存 + 重试
    │  │  Agent 5: 战术对位      │    │  ← Tavily Search + 缓存 + 重试
    │  │                        │    │
@@ -698,9 +684,9 @@ project/
 | 技术亮点 | 文件位置 | 面试关键词 |
 |---------|---------|-----------|
 | 多 Agent 并行协作 | `workflow.py` | LangGraph, Fan-out/Fan-in, StateGraph |
-| 优雅降级 + 超时控制 | `workflow.py` | Graceful Degradation, ThreadPoolExecutor |
-| RAG 两阶段检索 | `retriever.py` | Query Rewriting, LLM Reranking |
-| ReAct 自主 Agent | `team_reporter.py` | Tool Calling, Reason + Act |
+| 优雅降级 | `workflow.py` | Graceful Degradation, Annotated Reducer |
+| FAISS RAG 检索 | `retriever.py` | FAISS, DashScope Embeddings, 向量相似度搜索 |
+| SSE 流式状态追踪 | `routes.py`, `frontend_ui.py` | Server-Sent Events, 实时 Agent 状态 |
 | 全 Agent 结构化输出 | `models.py` + 各 Agent | Pydantic, with_structured_output |
 | 搜索重试 + 指数退避 | `nba_client.py` | Tenacity, Exponential Backoff |
 | TTL 内存缓存 | `cache.py` | 线程安全, TTL 缓存, 性能优化 |

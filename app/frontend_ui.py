@@ -237,12 +237,18 @@ def display_results(details: dict, exec_time: float):
 
 # ─── 预测执行 ───
 
+def _update_tracker(placeholder, agent_states: dict):
+    """Update tracker using components.html inside a container (bypasses Streamlit HTML sanitizer)."""
+    with placeholder.container():
+        components.html(render_tracker_html(agent_states), height=380)
+
+
 def run_prediction_stream(home_team: str, away_team: str):
     agent_states = {a: "waiting" for a in PARALLEL_AGENTS}
     agent_states["final_predictor"] = "waiting"
 
     tracker = st.empty()
-    tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+    _update_tracker(tracker, agent_states)
 
     try:
         resp = requests.post(STREAM_URL, json={"team_home": home_team, "team_away": away_team},
@@ -274,7 +280,7 @@ def run_prediction_stream(home_team: str, away_team: str):
             k = event.get("agent")
             if k in agent_states:
                 agent_states[k] = "running"
-            tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+            _update_tracker(tracker, agent_states)
 
         elif etype == "agent_done":
             k = event.get("agent")
@@ -283,7 +289,7 @@ def run_prediction_stream(home_team: str, away_team: str):
             if all(agent_states.get(a) not in ("waiting", "running") for a in PARALLEL_AGENTS):
                 if k != "final_predictor":
                     agent_states["final_predictor"] = "running"
-            tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+            _update_tracker(tracker, agent_states)
 
         elif etype == "result":
             prediction_data = event
@@ -299,7 +305,7 @@ def run_prediction_stream(home_team: str, away_team: str):
     for a in agent_states:
         if agent_states[a] == "running":
             agent_states[a] = "success"
-    tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+    _update_tracker(tracker, agent_states)
 
     elapsed = time.time() - start_ts
     display_results(prediction_data.get("prediction_details", {}),
@@ -311,7 +317,7 @@ def run_prediction_fallback(home_team: str, away_team: str):
     agent_states["final_predictor"] = "waiting"
 
     tracker = st.empty()
-    tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+    _update_tracker(tracker, agent_states)
 
     start_ts = time.time()
     try:
@@ -331,7 +337,7 @@ def run_prediction_fallback(home_team: str, away_team: str):
     data = resp.json()
     for a in PARALLEL_AGENTS + ["final_predictor"]:
         agent_states[a] = data.get("agent_status", {}).get(a, "success")
-    tracker.markdown(render_tracker_html(agent_states), unsafe_allow_html=True)
+    _update_tracker(tracker, agent_states)
 
     display_results(data.get("prediction_details", {}), elapsed)
 

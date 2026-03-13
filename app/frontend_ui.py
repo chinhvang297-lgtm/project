@@ -1,6 +1,6 @@
 """
-NBA Game Predictor - Streamlit Frontend
-Premium dark theme with glassmorphism design
+NBA 比赛预测系统 - Streamlit 前端
+Glassmorphism 暗色主题 + 中文界面
 """
 import streamlit as st
 import streamlit.components.v1 as components
@@ -10,20 +10,20 @@ import time
 from datetime import datetime, timedelta
 
 st.set_page_config(
-    page_title="NBA Predictor AI",
+    page_title="NBA 智能预测系统",
     page_icon="https://cdn-icons-png.flaticon.com/512/889/889442.png",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ─── Full-page CSS injection ───
+# ─── 全局 CSS ───
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;900&display=swap');
 
-/* === Global === */
 html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif !important;
+    font-family: 'Noto Sans SC', 'Inter', sans-serif !important;
 }
 .main .block-container {
     max-width: 900px;
@@ -35,7 +35,6 @@ footer { visibility: hidden; }
 .stDeployButton { display: none; }
 header[data-testid="stHeader"] { background: transparent; }
 
-/* === Streamlit element overrides === */
 .stSelectbox > div > div { border-radius: 12px !important; }
 .stDateInput > div > div { border-radius: 12px !important; }
 .stTextInput > div > div > input { border-radius: 12px !important; }
@@ -54,10 +53,6 @@ button[kind="primary"]:hover {
     box-shadow: 0 8px 30px rgba(99, 102, 241, 0.4) !important;
     transform: translateY(-1px) !important;
 }
-div[data-testid="stStatusWidget"] {
-    border-radius: 16px !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -65,18 +60,16 @@ API_URL = "http://127.0.0.1:8000/api/v1/predict"
 STREAM_URL = "http://127.0.0.1:8000/api/v1/predict/stream"
 
 AGENT_LIST = [
-    ("recent_analyst",   "Recent Performance",     "Last 5 games stats & momentum"),
-    ("history_analyst",  "Historical RAG",          "Vector DB + web search history"),
-    ("team_reporter",    "News & Injuries",         "Injury reports & trade news"),
-    ("odds_analyst",     "Betting Odds",            "Market odds & public action"),
-    ("strategy_analyst", "Tactical Matchup",        "Lineups, depth & key matchups"),
-    ("final_predictor",  "Final Synthesis",         "Combines all 5 reports"),
+    ("recent_analyst",   "近期表现分析师",    "分析两队最近5场比赛的状态与势头"),
+    ("history_analyst",  "历史对战分析师",    "RAG向量检索 + 网络搜索历史数据"),
+    ("team_reporter",    "伤病新闻记者",      "扫描伤病报告与交易新闻"),
+    ("odds_analyst",     "赔率市场分析师",    "解读博彩市场赔率与资金流向"),
+    ("strategy_analyst", "战术对位分析师",    "分析首发阵容与关键对位"),
+    ("final_predictor",  "最终决策合成器",    "综合5份专家报告生成预测"),
 ]
 
 PARALLEL_AGENTS = [a[0] for a in AGENT_LIST[:5]]
 
-
-# ─── Helpers ───
 
 @st.cache_data(ttl=600)
 def fetch_nba_schedule(date_str: str):
@@ -98,13 +91,13 @@ def fetch_nba_schedule(date_str: str):
 
 def _badge(state: str) -> str:
     m = {
-        "waiting":  ("Waiting",  "#3b3b4f", "#6b7280"),
-        "running":  ("Running",  "#1e3a5f", "#60a5fa"),
-        "success":  ("Done",     "#064e3b", "#34d399"),
-        "fallback": ("Fallback", "#78350f", "#fbbf24"),
-        "failed":   ("Failed",   "#7f1d1d", "#fca5a5"),
+        "waiting":  ("等待中",  "#3b3b4f", "#6b7280"),
+        "running":  ("运行中",  "#1e3a5f", "#60a5fa"),
+        "success":  ("已完成",  "#064e3b", "#34d399"),
+        "fallback": ("已降级",  "#78350f", "#fbbf24"),
+        "failed":   ("失败",    "#7f1d1d", "#fca5a5"),
     }
-    label, bg, fg = m.get(state, ("Unknown", "#3b3b4f", "#9ca3af"))
+    label, bg, fg = m.get(state, ("未知", "#3b3b4f", "#9ca3af"))
     return f'<span style="background:{bg};color:{fg};padding:2px 10px;border-radius:10px;font-size:0.75rem;font-weight:600;letter-spacing:0.5px;">{label}</span>'
 
 
@@ -144,10 +137,10 @@ def render_tracker_html(agent_states: dict) -> str:
     return f"""
     <div style="background:rgba(30,41,59,0.65);backdrop-filter:blur(12px);
                 border:1px solid rgba(255,255,255,0.07);border-radius:16px;
-                padding:20px 24px;margin:8px 0;">
+                padding:20px 24px;margin:8px 0;font-family:'Noto Sans SC','Inter',sans-serif;">
         <div style="font-size:0.78rem;color:#64748b;text-transform:uppercase;
                      letter-spacing:2px;font-weight:600;margin-bottom:12px;">
-            Agent Pipeline
+            Agent 执行状态
         </div>
         {rows}
     </div>
@@ -156,7 +149,7 @@ def render_tracker_html(agent_states: dict) -> str:
 
 
 def display_results(details: dict, exec_time: float):
-    winner = details.get("winner", "Unknown")
+    winner = details.get("winner", "未知")
     prob = details.get("win_probability", 0)
     score = details.get("score_prediction", "N/A")
     confidence = details.get("confidence_level", "N/A")
@@ -167,59 +160,59 @@ def display_results(details: dict, exec_time: float):
 
     st.markdown("")
 
-    # Winner banner
+    # 冠军横幅
     components.html(f"""
     <div style="background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(99,102,241,0.10));
                 border:1px solid rgba(16,185,129,0.25);border-radius:20px;
-                padding:32px 24px;text-align:center;font-family:Inter,sans-serif;">
+                padding:32px 24px;text-align:center;font-family:'Noto Sans SC','Inter',sans-serif;">
         <div style="font-size:0.75rem;color:#9ca3af;text-transform:uppercase;
-                     letter-spacing:3px;font-weight:600;">Predicted Winner</div>
+                     letter-spacing:3px;font-weight:600;">预测获胜方</div>
         <div style="font-size:2.4rem;font-weight:800;color:#34d399;margin:6px 0 2px;">
             {winner}
         </div>
-        <div style="font-size:1.1rem;color:#a78bfa;font-weight:600;">{prob}% Win Probability</div>
+        <div style="font-size:1.1rem;color:#a78bfa;font-weight:600;">胜率 {prob}%</div>
     </div>
     """, height=150)
 
-    # Stat cards row
-    cards_html = ""
+    # 统计卡片
     stats = [
-        ("Score Prediction", score, "#e2e8f0"),
-        ("Confidence", confidence, "#fbbf24"),
-        ("Agent Agreement", agreement, "#818cf8"),
+        ("比分预测", score, "#e2e8f0"),
+        ("置信度", confidence, "#fbbf24"),
+        ("Agent共识", agreement, "#818cf8"),
     ]
+    cards_html = ""
     for label, value, color in stats:
         cards_html += f"""
         <div style="flex:1;background:rgba(30,41,59,0.6);backdrop-filter:blur(10px);
                      border:1px solid rgba(255,255,255,0.06);border-radius:16px;
                      padding:20px 16px;text-align:center;">
-            <div style="font-size:0.7rem;color:#9ca3af;text-transform:uppercase;
-                         letter-spacing:2px;font-weight:600;margin-bottom:6px;">{label}</div>
+            <div style="font-size:0.7rem;color:#9ca3af;letter-spacing:2px;
+                         font-weight:600;margin-bottom:6px;">{label}</div>
             <div style="font-size:1.35rem;font-weight:700;color:{color};">{value}</div>
         </div>"""
 
     components.html(f"""
-    <div style="display:flex;gap:12px;font-family:Inter,sans-serif;">
+    <div style="display:flex;gap:12px;font-family:'Noto Sans SC','Inter',sans-serif;">
         {cards_html}
     </div>
     """, height=110)
 
-    # Risk warning
-    if risk and risk.lower() not in ("none", "n/a", ""):
-        st.warning(f"Risk Warning: {risk}")
+    # 风险警告
+    if risk and risk.lower() not in ("none", "n/a", "无", ""):
+        st.warning(f"风险提示：{risk}")
 
-    # Summary
+    # 综合分析
     if summary:
         components.html(f"""
         <div style="background:rgba(30,41,59,0.5);backdrop-filter:blur(8px);
                      border-left:4px solid #8b5cf6;border-radius:0 14px 14px 0;
-                     padding:20px 24px;margin:4px 0;font-family:Inter,sans-serif;
-                     color:#cbd5e1;font-size:0.95rem;line-height:1.75;">
+                     padding:20px 24px;margin:4px 0;font-family:'Noto Sans SC','Inter',sans-serif;
+                     color:#cbd5e1;font-size:0.95rem;line-height:1.85;">
             {summary}
         </div>
-        """, height=max(80, len(summary) // 2))
+        """, height=max(100, len(summary) // 2 + 40))
 
-    # Key factors
+    # 关键因素
     if factors:
         chips = ""
         for f in factors:
@@ -230,20 +223,19 @@ def display_results(details: dict, exec_time: float):
                 f'font-weight:500;">{f}</span>'
             )
         components.html(f"""
-        <div style="font-family:Inter,sans-serif;">
-            <div style="font-size:0.78rem;color:#64748b;text-transform:uppercase;
-                         letter-spacing:2px;font-weight:600;margin-bottom:8px;">
-                Key Factors
+        <div style="font-family:'Noto Sans SC','Inter',sans-serif;">
+            <div style="font-size:0.78rem;color:#64748b;letter-spacing:2px;
+                         font-weight:600;margin-bottom:8px;">
+                关键因素
             </div>
             <div>{chips}</div>
         </div>
         """, height=max(60, 40 + 36 * ((len(factors) + 2) // 3)))
 
-    # Exec time footer
-    st.caption(f"Completed in {exec_time:.1f}s  |  6 agents (5 parallel + 1 synthesis)")
+    st.caption(f"执行耗时 {exec_time:.1f} 秒  |  6个Agent（5个并行 + 1个综合）")
 
 
-# ─── Prediction runners ───
+# ─── 预测执行 ───
 
 def run_prediction_stream(home_team: str, away_team: str):
     agent_states = {a: "waiting" for a in PARALLEL_AGENTS}
@@ -256,14 +248,14 @@ def run_prediction_stream(home_team: str, away_team: str):
         resp = requests.post(STREAM_URL, json={"team_home": home_team, "team_away": away_team},
                              stream=True, timeout=300)
     except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend. Run: `python -m uvicorn app.main:app --port 8000`")
+        st.error("无法连接后端服务，请确保 FastAPI 正在运行：\n\n`python -m uvicorn app.main:app --port 8000`")
         return
     except requests.exceptions.Timeout:
-        st.error("Request timed out.")
+        st.error("请求超时，请重试。")
         return
 
     if resp.status_code != 200:
-        st.error(f"Backend error ({resp.status_code})")
+        st.error(f"后端错误（{resp.status_code}）")
         return
 
     prediction_data = None
@@ -297,11 +289,11 @@ def run_prediction_stream(home_team: str, away_team: str):
             prediction_data = event
 
         elif etype == "error":
-            st.error(f"Pipeline error: {event.get('message')}")
+            st.error(f"流水线错误：{event.get('message')}")
             return
 
     if not prediction_data:
-        st.error("No prediction received.")
+        st.error("未收到预测结果。")
         return
 
     for a in agent_states:
@@ -325,15 +317,15 @@ def run_prediction_fallback(home_team: str, away_team: str):
     try:
         resp = requests.post(API_URL, json={"team_home": home_team, "team_away": away_team}, timeout=300)
     except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend. Run: `python -m uvicorn app.main:app --port 8000`")
+        st.error("无法连接后端服务，请确保 FastAPI 正在运行：\n\n`python -m uvicorn app.main:app --port 8000`")
         return
     except requests.exceptions.Timeout:
-        st.error("Request timed out.")
+        st.error("请求超时，请重试。")
         return
     elapsed = time.time() - start_ts
 
     if resp.status_code != 200:
-        st.error(f"Backend error ({resp.status_code}): {resp.text}")
+        st.error(f"后端错误（{resp.status_code}）：{resp.text}")
         return
 
     data = resp.json()
@@ -344,49 +336,45 @@ def run_prediction_fallback(home_team: str, away_team: str):
     display_results(data.get("prediction_details", {}), elapsed)
 
 
-# ─── Main ───
+# ─── 主页面 ───
 
 def main():
-    # Header
     components.html("""
-    <div style="text-align:center;font-family:Inter,sans-serif;padding:10px 0 30px;">
+    <div style="text-align:center;font-family:'Noto Sans SC','Inter',sans-serif;padding:10px 0 30px;">
         <div style="font-size:3rem;font-weight:900;
                      background:linear-gradient(135deg,#818cf8,#c084fc,#f472b6);
                      -webkit-background-clip:text;-webkit-text-fill-color:transparent;
                      letter-spacing:-1px;line-height:1.1;">
-            NBA Predictor
+            NBA 智能预测
         </div>
         <div style="color:#64748b;font-size:0.95rem;margin-top:6px;font-weight:400;
                      letter-spacing:0.5px;">
-            Multi-Agent AI &nbsp;&bull;&nbsp; FAISS RAG &nbsp;&bull;&nbsp; Parallel Execution &nbsp;&bull;&nbsp; Real-time Tracking
+            多Agent协作系统 &nbsp;&bull;&nbsp; FAISS RAG检索增强 &nbsp;&bull;&nbsp; 并行Fan-out架构 &nbsp;&bull;&nbsp; 实时状态追踪
         </div>
     </div>
     """, height=120)
 
-    # Date picker
     col_date, _ = st.columns([1, 2])
     with col_date:
         selected_date = st.date_input(
-            "Game Date",
+            "选择比赛日期",
             value=datetime.now().date(),
             min_value=datetime.now().date() - timedelta(days=7),
             max_value=datetime.now().date() + timedelta(days=7),
         )
     date_str = selected_date.strftime("%Y-%m-%d")
 
-    # Load schedule
-    with st.spinner("Loading schedule..."):
+    with st.spinner("加载赛程中..."):
         games = fetch_nba_schedule(date_str)
 
-    # No games → manual input
     if not games:
-        st.info(f"No games on {date_str}. Enter teams manually:")
+        st.info(f"{date_str} 没有比赛，请选择其他日期或手动输入球队：")
         c1, c2 = st.columns(2)
         with c1:
-            manual_home = st.text_input("Home Team", placeholder="Los Angeles Lakers")
+            manual_home = st.text_input("主队", placeholder="例如：Los Angeles Lakers")
         with c2:
-            manual_away = st.text_input("Away Team", placeholder="Boston Celtics")
-        if st.button("Predict", type="primary", use_container_width=True,
+            manual_away = st.text_input("客队", placeholder="例如：Boston Celtics")
+        if st.button("开始预测", type="primary", use_container_width=True,
                       disabled=not (manual_home and manual_away)):
             try:
                 run_prediction_stream(manual_home.strip(), manual_away.strip())
@@ -394,21 +382,19 @@ def main():
                 run_prediction_fallback(manual_home.strip(), manual_away.strip())
         return
 
-    # Game selector
-    st.markdown(f"##### {len(games)} Games on {date_str}")
+    st.markdown(f"##### {date_str} 共 {len(games)} 场比赛")
     opts = [f"{g['away']}  @  {g['home']}" for g in games]
-    idx = st.selectbox("Game", range(len(opts)), format_func=lambda i: opts[i],
+    idx = st.selectbox("选择比赛", range(len(opts)), format_func=lambda i: opts[i],
                        label_visibility="collapsed")
     game = games[idx]
 
-    # Game card (rendered via components.html for reliable CSS)
     components.html(f"""
     <div style="background:linear-gradient(145deg,rgba(30,41,59,0.7),rgba(15,23,42,0.8));
                 backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.07);
                 border-radius:20px;padding:30px 20px;text-align:center;
-                font-family:Inter,sans-serif;">
+                font-family:'Noto Sans SC','Inter',sans-serif;">
         <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;
-                     letter-spacing:3px;font-weight:600;">Away</div>
+                     letter-spacing:3px;font-weight:600;">客队</div>
         <div style="font-size:1.6rem;font-weight:800;color:#e2e8f0;margin:4px 0 10px;">
             {game['away']}</div>
         <div style="display:inline-block;background:rgba(99,102,241,0.15);
@@ -418,21 +404,19 @@ def main():
         <div style="font-size:1.6rem;font-weight:800;color:#e2e8f0;margin:10px 0 4px;">
             {game['home']}</div>
         <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;
-                     letter-spacing:3px;font-weight:600;">Home</div>
+                     letter-spacing:3px;font-weight:600;">主队</div>
     </div>
     """, height=210)
 
-    # Predict button
-    if st.button("Predict", type="primary", use_container_width=True):
+    if st.button("开始预测", type="primary", use_container_width=True):
         try:
             run_prediction_stream(game["home"], game["away"])
         except Exception:
             run_prediction_fallback(game["home"], game["away"])
 
-    # Footer
     st.markdown("")
     st.markdown("")
-    st.caption("Powered by LangGraph Multi-Agent System  |  FAISS RAG  |  Fan-out/Fan-in Architecture")
+    st.caption("基于 LangGraph 多Agent系统  |  FAISS RAG 检索增强  |  Fan-out/Fan-in 并行架构")
 
 
 if __name__ == "__main__":

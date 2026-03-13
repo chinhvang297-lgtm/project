@@ -10,7 +10,6 @@ python-dotenv
 langchain
 langchain-core
 langchain-openai
-langchain-chroma
 langchain-community
 langgraph
 langgraph-checkpoint
@@ -26,7 +25,7 @@ tiktoken
 tenacity
 
 # RAG / Vector DB
-chromadb
+faiss-cpu
 
 # Database
 SQLAlchemy
@@ -37,6 +36,9 @@ httpx
 
 # Frontend
 streamlit
+
+# SSE Streaming
+sse-starlette
 
 # Utilities
 orjson

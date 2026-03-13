@@ -3,6 +3,7 @@ API routes for the NBA Prediction system.
 
 Endpoints:
 - POST /predict          - Run a full prediction for a matchup
+- POST /predict/stream   - SSE stream with live agent status updates
 - GET  /predictions      - List prediction history with pagination
 - GET  /predictions/{id} - Get a specific prediction by ID
 - POST /evaluate/{id}    - Submit actual game result for evaluation
@@ -15,6 +16,7 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from pydantic import BaseModel
@@ -116,6 +118,108 @@ async def predict_match(request: MatchRequest, db: Session = Depends(get_db)):
     prediction_cache.set(cache_key, response)
 
     return response
+
+
+# ─── POST /predict/stream (SSE) ───────────────────────────────────────────────
+
+AGENT_DISPLAY_NAMES = {
+    "recent_analyst": "Recent Stats Analyst",
+    "history_analyst": "Historical Matchup Analyst",
+    "team_reporter": "Team News Reporter",
+    "odds_analyst": "Betting Odds Analyst",
+    "strategy_analyst": "Strategy Analyst",
+    "final_predictor": "Final Predictor",
+}
+
+
+@router.post("/predict/stream")
+async def predict_match_stream(request: MatchRequest):
+    """
+    SSE streaming endpoint for live agent status tracking.
+
+    Streams events as each agent completes:
+      - agent_start: agent has begun (emitted for all at start)
+      - agent_done: agent finished with status
+      - result: final prediction data
+    """
+    def event_generator():
+        initial_state = {
+            "team_home": request.team_home,
+            "team_away": request.team_away,
+        }
+
+        # Emit start events for all parallel agents
+        parallel_agents = [
+            "recent_analyst", "history_analyst", "team_reporter",
+            "odds_analyst", "strategy_analyst",
+        ]
+        for agent in parallel_agents:
+            event = json.dumps({
+                "type": "agent_start",
+                "agent": agent,
+                "display_name": AGENT_DISPLAY_NAMES.get(agent, agent),
+            })
+            yield f"data: {event}\n\n"
+
+        start_time = time.time()
+        collected_status = {}
+        final_prediction = None
+
+        try:
+            # "updates" mode yields {node_name: output_dict} per completed node
+            # Even parallel nodes are reported individually as they finish
+            for update in app_workflow.stream(
+                initial_state, stream_mode="updates"
+            ):
+                for node_name, node_output in update.items():
+                    agent_st = {}
+                    if isinstance(node_output, dict):
+                        agent_st = node_output.get("agent_status", {})
+                        if node_name == "final_predictor":
+                            final_prediction = node_output.get("final_prediction")
+
+                    status = agent_st.get(node_name, "success")
+                    collected_status[node_name] = status
+
+                    ev = json.dumps({
+                        "type": "agent_done",
+                        "agent": node_name,
+                        "display_name": AGENT_DISPLAY_NAMES.get(node_name, node_name),
+                        "status": status,
+                    })
+                    yield f"data: {ev}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming workflow failed: {e}")
+            err = json.dumps({"type": "error", "message": str(e)})
+            yield f"data: {err}\n\n"
+            return
+
+        execution_time = time.time() - start_time
+
+        final_json_str = final_prediction or "{}"
+        try:
+            final_data = json.loads(final_json_str)
+        except (json.JSONDecodeError, TypeError):
+            final_data = {"summary": str(final_json_str)}
+
+        result_event = json.dumps({
+            "type": "result",
+            "prediction_details": final_data,
+            "execution_time_seconds": round(execution_time, 2),
+            "agent_status": collected_status,
+        })
+        yield f"data: {result_event}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ─── GET /predictions ─────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 """
 NBA Historical Data Ingestion Script.
 
-Fetches real NBA game data from ESPN's public API (no authentication required,
-no anti-scraping blocks) and stores it in ChromaDB for RAG retrieval.
+Fetches real NBA game data from ESPN's public API and stores it
+in a FAISS vector database for RAG retrieval.
 
-Data source: ESPN API (site.api.espn.com)
+Usage: python -m scripts.ingest_data
 """
 import sys
 import os
@@ -17,10 +17,12 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.documents import Document
-from app.tools.retriever import get_vector_store
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import DashScopeEmbeddings
 
 
-# ESPN team IDs for the teams we want to track
+PERSIST_DIRECTORY = "./nba_knowledge_db"
+
 TEAMS_CONFIG = [
     {"id": "13", "code": "LAL", "name": "Los Angeles Lakers"},
     {"id": "9",  "code": "GSW", "name": "Golden State Warriors"},
@@ -34,34 +36,26 @@ TEAMS_CONFIG = [
     {"id": "6",  "code": "DAL", "name": "Dallas Mavericks"},
 ]
 
-# ESPN season types: 2 = Regular Season, 3 = Playoffs
 SEASON_YEAR = 2025
 SEASON_TYPE = 2
 
 
 def fetch_team_schedule(team_id: str, team_name: str, team_code: str) -> list[Document]:
-    """
-    Fetch a team's game results from ESPN API.
-
-    ESPN API endpoint is public and does not require authentication.
-    Returns a list of LangChain Document objects.
-    """
+    """Fetch a team's completed game results from ESPN API."""
     url = (
         f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/"
         f"teams/{team_id}/schedule?season={SEASON_YEAR}&seasontype={SEASON_TYPE}"
     )
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    print(f"📡 Fetching schedule for {team_name} (ESPN API)...")
+    print(f"  Fetching schedule for {team_name}...")
 
     try:
         response = requests.get(url, headers=headers, timeout=15)
-
         if response.status_code != 200:
-            print(f"   ❌ ESPN API returned status {response.status_code}")
+            print(f"    ESPN API returned status {response.status_code}")
             return []
 
         data = response.json()
@@ -70,12 +64,10 @@ def fetch_team_schedule(team_id: str, team_name: str, team_code: str) -> list[Do
 
         for event in events:
             try:
-                # Extract game info
                 competition = event["competitions"][0]
-                game_date = event.get("date", "Unknown")[:10]  # "2024-10-22T..."
+                game_date = event.get("date", "Unknown")[:10]
                 status = competition.get("status", {}).get("type", {}).get("name", "")
 
-                # Only process completed games
                 if status != "STATUS_FINAL":
                     continue
 
@@ -83,22 +75,11 @@ def fetch_team_schedule(team_id: str, team_name: str, team_code: str) -> list[Do
                 if len(competitors) < 2:
                     continue
 
-                # ESPN always lists home team first
                 home_team_data = competitors[0]
                 away_team_data = competitors[1]
-
                 home_name = home_team_data["team"]["displayName"]
                 away_name = away_team_data["team"]["displayName"]
-                home_score = home_team_data.get("score", {}).get("value", 0)
-                away_score = away_team_data.get("score", {}).get("value", 0)
 
-                # Handle score format (sometimes it's a string directly)
-                if isinstance(home_score, dict):
-                    home_score = home_score.get("value", 0)
-                if isinstance(away_score, dict):
-                    away_score = away_score.get("value", 0)
-
-                # Try to get score as displayValue if available
                 home_score_str = home_team_data.get("score", "0")
                 away_score_str = away_team_data.get("score", "0")
                 if isinstance(home_score_str, dict):
@@ -106,14 +87,7 @@ def fetch_team_schedule(team_id: str, team_name: str, team_code: str) -> list[Do
                 if isinstance(away_score_str, dict):
                     away_score_str = away_score_str.get("displayValue", "0")
 
-                # Determine winner
                 home_winner = home_team_data.get("winner", False)
-                if home_winner:
-                    result_text = f"{home_name} won"
-                else:
-                    result_text = f"{away_name} won"
-
-                # Determine if our tracked team won
                 is_home = (home_name == team_name)
                 our_score = home_score_str if is_home else away_score_str
                 opp_score = away_score_str if is_home else home_score_str
@@ -145,53 +119,63 @@ def fetch_team_schedule(team_id: str, team_name: str, team_code: str) -> list[Do
                     },
                 )
                 docs.append(doc)
-
-            except (KeyError, IndexError, TypeError) as e:
-                # Skip malformed events
+            except (KeyError, IndexError, TypeError):
                 continue
 
-        print(f"   ✅ Fetched {len(docs)} completed games for {team_name}")
+        print(f"    Fetched {len(docs)} completed games")
         return docs
 
     except requests.exceptions.RequestException as e:
-        print(f"   ❌ Network error for {team_name}: {e}")
+        print(f"    Network error: {e}")
         return []
 
 
 def main():
-    print("🚀 Starting NBA knowledge base construction (Source: ESPN Public API)...")
-    print(f"   Season: {SEASON_YEAR - 1}-{SEASON_YEAR}")
-    print(f"   Teams: {len(TEAMS_CONFIG)}")
-    print()
+    print(f"Building NBA knowledge base ({SEASON_YEAR - 1}-{SEASON_YEAR} season)...\n")
+
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        print("ERROR: DASHSCOPE_API_KEY not set. Check your .env file.")
+        return
 
     all_docs = []
-
     for team in TEAMS_CONFIG:
         docs = fetch_team_schedule(team["id"], team["name"], team["code"])
         all_docs.extend(docs)
-        time.sleep(1)  # Polite delay between requests
+        time.sleep(0.5)
 
     if not all_docs:
-        print("\n⚠️ No data fetched. Check your network connection.")
+        print("\nNo data fetched. Check your network connection.")
         return
 
-    print(f"\n💾 Writing {len(all_docs)} game records to ChromaDB vector database...")
+    print(f"\nEmbedding {len(all_docs)} game records into FAISS vector store...")
 
-    try:
-        vector_db = get_vector_store()
-        batch_size = 50
-        for i in range(0, len(all_docs), batch_size):
-            batch = all_docs[i : i + batch_size]
-            vector_db.add_documents(batch)
-            print(f"   Written batch {i // batch_size + 1} ({len(batch)} records)")
+    embeddings = DashScopeEmbeddings(
+        model="text-embedding-v1",
+        dashscope_api_key=api_key,
+    )
 
-        print(f"\n✅ Knowledge base built successfully!")
-        print(f"   Total records: {len(all_docs)}")
-        print(f"   Stored in: ./nba_knowledge_db")
+    # Build FAISS index in batches
+    batch_size = 50
+    vector_db = None
 
-    except Exception as e:
-        print(f"\n❌ Database write error: {e}")
-        print("   Make sure DASHSCOPE_API_KEY is set in your .env file")
+    for i in range(0, len(all_docs), batch_size):
+        batch = all_docs[i: i + batch_size]
+        if vector_db is None:
+            vector_db = FAISS.from_documents(batch, embeddings)
+        else:
+            batch_db = FAISS.from_documents(batch, embeddings)
+            vector_db.merge_from(batch_db)
+        print(f"  Batch {i // batch_size + 1}: embedded {len(batch)} records")
+        time.sleep(0.3)
+
+    # Save to disk
+    os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
+    vector_db.save_local(PERSIST_DIRECTORY)
+
+    print(f"\nKnowledge base built successfully!")
+    print(f"  Total records: {len(all_docs)}")
+    print(f"  Saved to: {PERSIST_DIRECTORY}/")
 
 
 if __name__ == "__main__":

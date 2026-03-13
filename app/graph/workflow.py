@@ -1,17 +1,15 @@
 """
-LangGraph workflow with graceful degradation.
+LangGraph workflow with parallel fan-out and graceful degradation.
 
-Features:
-- Timeout wrapper: agents that take too long are skipped gracefully
-- Fault-tolerant execution: individual agent failures don't crash the pipeline
-- Agent health tracking: records which agents succeeded, failed, or timed out
+Architecture:
+- 5 analyst agents run in PARALLEL (fan-out from START)
+- 1 final predictor synthesizes all reports (fan-in)
+- Each agent is wrapped with error handling for fault tolerance
 """
-import concurrent.futures
 from functools import wraps
 
 from langgraph.graph import StateGraph, START, END
 
-from app.core.config import settings
 from app.core.logger import get_logger
 from app.graph.nodes.state import AgentState
 from app.graph.nodes.recent_analyst import recent_analyst_node
@@ -26,28 +24,15 @@ logger = get_logger("workflow")
 
 def with_graceful_degradation(node_func, agent_name: str, output_key: str):
     """
-    Wrap an agent node with timeout and error handling.
+    Wrap an agent node with error handling.
 
-    If an agent fails or times out:
-    - Returns a fallback message instead of crashing
-    - Records the failure in agent_status for the final predictor
-    - Allows the rest of the pipeline to continue
+    If an agent fails, returns a fallback message and records the failure
+    in agent_status so the final predictor can adjust its analysis.
     """
     @wraps(node_func)
     def wrapper(state: AgentState) -> dict:
-        timeout = settings.agent_timeout
-
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(node_func, state)
-                result = future.result(timeout=timeout)
-                return result
-        except concurrent.futures.TimeoutError:
-            logger.error(f"[TIMEOUT] {agent_name} exceeded {timeout}s limit")
-            return {
-                output_key: f"[{agent_name} timed out after {timeout}s — report unavailable]",
-                "agent_status": {agent_name: "timeout"},
-            }
+            return node_func(state)
         except Exception as e:
             logger.error(f"[FAILED] {agent_name} crashed: {type(e).__name__}: {e}")
             return {
@@ -78,7 +63,7 @@ safe_strategy_analyst = with_graceful_degradation(
 # Build the workflow graph
 workflow = StateGraph(AgentState)
 
-# Register nodes (with graceful degradation wrappers)
+# Register all 6 nodes
 workflow.add_node("recent_analyst", safe_recent_analyst)
 workflow.add_node("history_analyst", safe_history_analyst)
 workflow.add_node("team_reporter", safe_team_reporter)
@@ -86,7 +71,7 @@ workflow.add_node("odds_analyst", safe_odds_analyst)
 workflow.add_node("strategy_analyst", safe_strategy_analyst)
 workflow.add_node("final_predictor", final_predictor_node)
 
-# Fan-out: all 5 analysts run in parallel from START
+# Fan-out: 5 analysts run in PARALLEL from START
 workflow.add_edge(START, "recent_analyst")
 workflow.add_edge(START, "history_analyst")
 workflow.add_edge(START, "team_reporter")
@@ -106,4 +91,4 @@ workflow.add_edge("final_predictor", END)
 # Compile the workflow
 app_workflow = workflow.compile()
 
-logger.info("Workflow compiled successfully with graceful degradation enabled")
+logger.info("Workflow compiled: 5 parallel agents -> final predictor (fan-out/fan-in)")
